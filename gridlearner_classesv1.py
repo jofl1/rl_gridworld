@@ -1,6 +1,8 @@
-import numpy as np #type:ignore
+from matplotlib import pyplot as plt
+from matplotlib.animation import FuncAnimation
+import numpy as np  #type:ignore
 import random
-import matplotlib.pyplot as plt #type:ignore
+import matplotlib.animation as animation
 
 # Stores all hyperparameters for the simulation.
 class Config:
@@ -8,7 +10,7 @@ class Config:
         self.learning_rate = 0.1
         self.discount_factor = 0.9
         self.exploration_rate = 0.1
-        self.episodes = 1000
+        self.episodes = 10000
         self.steps = 20
         self.grid_size = 4
 
@@ -134,9 +136,6 @@ class Trainer:
                 total_reward += reward
                 steps += 1
             self.episode_rewards.append(total_reward)
-            if (episode + 1) % 1 == 0:
-                avg_reward = np.mean(self.episode_rewards[-10000:])
-                print(f"Episode {episode + 1}/{self.config.episodes} | Avg Reward: {avg_reward:.2f}")
         print("\nTraining finished.")
 
 # Handles the visualisation of the final policy and Q-values.
@@ -207,9 +206,45 @@ class Visualiser:
         success_rate = sum(r > 0 for r in self.episode_rewards) / self.config.episodes * 100
         print(f"\nFinal {config.episodes} episode average reward: {final_avg_reward:.2f}")
         print(f"Success rate (reaching goal): {success_rate:.1f}%")
-
         self.plot_q_values()
-
+        
+class livevisualiser:
+    def __init__(self, trainer: Trainer, config: Config):
+        self.trainer = trainer
+        self.world = trainer.world
+        self.config = config
+        self.fig, self.ax = plt.subplots(figsize=(8,8))
+        self.frame_info = [] # holds all info re arrows and text
+        self.training_complete = False # should show final state at the end of animation
+        
+    def update_frame(self, frame: int): # performs single step in the animation
+        if self.training_complete:
+            return
+            
+        for info in self.frame_info: # remove all info from previous frame to make way for next one
+            info.remove()
+        self.frame_info[]
+        
+        all_q_values = np.array([s.q_values for row in self.world.grid for s in row]).flatten()
+        q_min, q_max = np.min(all_q_values), np.max(all_q_values)
+        
+        for r in range(self.world.size): #iterate through grid
+            for c in range(self.world.size):
+                state = self.world.grid[r][c]
+                
+                if state.is_terminal(): continue
+                
+                for i in range(4):
+                    action = Action(i)
+                    q_val = state.get_q_value(action)
+                    
+                    normalise_q = (q_val - q_min)/(q_max - q_min + 1e-9) # normalise to 0-1 add epsilon to avoid div by 0
+                    
+                    arrow_size = 0.05 +normalise_q * 0.15
+                    arrow
+                
+        
+        
 # Main execution block: initialises and runs the simulation.
 config = Config()
 world = World(config)
