@@ -1,214 +1,238 @@
 import numpy as np #type:ignore
 import random
-from enum import Enum
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt #type:ignore
 
-#  group all  hyperparameters
+# standard class to group all hyperparameters.
 class Config:
-    # how much the agent learns from new information
-    learning_rate = 0.02
-    # importance of future rewards (gamma)
-    discount_factor = 0.9
-    # probability of the agent taking a random action to encourage discovering new paths
-    exploration_rate = 0.1
-    # total number of training sessions
-    episodes = 10000
+    def __init__(self):
+        # how much the agent learns from new information
+        self.learning_rate = 0.1
+        # importance of future rewards (gamma)
+        self.discount_factor = 0.9
+        # probability of the agent taking a random action to encourage discovering new paths
+        self.exploration_rate = 0.1
+        # total number of training sessions
+        self.episodes = 1000
 
-# Using an Enum
-class Action(Enum):
-    up = 0
-    right = 1
-    down = 2
-    left = 3
+        self.steps = 20
+        # size of the grid world
+        self.grid_size = 4
+
+
+#  each action is now an object
+# This base class defines the common interface for all action strategies.
+class Action:
+    def __init__(self, action_index: int):
+        self.action_index = action_index
+        return
+
+    def name(self):
+        names = ['Up', 'Right', 'Down', 'Left']
+        return names[self.action_index]
+
+    def get_index(self):
+        return self.action_index
+
+    def symbol(self):
+        return ['↑', '→', '↓', '←' ][self.action_index]
+
+    @staticmethod
+    def get_random():
+        action_index = random.randint(0,3)
+        return Action(action_index)
+
+
+class State:
+    def __init__(self, row: int, col: int, reward: int):
+        self.row = row
+        self.col = col
+        self.reward = reward
+        self.q_values = np.zeros(4)
+
+    def get_reward(self):
+        return self.reward
+
+    def get_q_value(self, action: Action):
+        return self.q_values[action.get_index()]
+
+    def set_q_value(self, action: Action, q_value: float):
+        self.q_values[action.get_index()] = q_value
+
+    def get_max_action(self):
+        return Action(np.argmax(self.q_values))
+
+    def is_terminal(self):
+        return self.reward != 0
+
+    def max_future_q(self):
+        return 0.0 if self.is_terminal() else np.max(self.q_values)
+
+    def to_string(self):
+        return f"({self.row} ,{self.col})"
 
 # class defining the environment
 class World:
-    def __init__(self):
-        self.size = 4
-        self.start_state = (3, 0)
-        # The reward grid defines the goal (+1) and penalties (-1)
-        self.reward_grid = np.array([
-            [0, 0, 0, 1],
-            [0, -1, 0, 0],
-            [0, 0, 0, 0],
-            [0, 0, 0, 0]
-        ])
+    def __init__(self, config: Config):
+        self.size = config.grid_size
+        self.grid = []
+        for row in range(self.size):
+            cols = []
+            for col in range(self.size):
+                cols.append(State(row, col, self.reward(row, col)))
+            self.grid.append(cols)
 
-    def get_reward(self, state):
-        """Returns the reward for entering a given state."""
-        return self.reward_grid[state]
+    def get_start_state(self) -> State:
+        return self.grid[3][0]
 
-    def is_terminal_state(self, state):
-        """Checks if an episode should end"""
-        return self.reward_grid[state] != 0
+    def reward(self, row: int, col: int):
+        if row == 0 and col == self.size-1:
+            return +1
+        elif row == 1 and col == 1:
+            return -1
+        return 0
 
-    def get_next_state(self, state, action):
-        """Calculates the agent's new position"""
-        row, col = state
-        if action == Action.up.value: row = max(0, row - 1)
-        elif action == Action.right.value: col = min(self.size - 1, col + 1)
-        elif action == Action.down.value: row = min(self.size - 1, row + 1)
-        elif action == Action.left.value: col = max(0, col - 1)
-        return (row, col)
+    def get_next_state(self, state: State, action: Action) -> State:
+        if action.get_index() == 0:
+            return self.grid[max(0, state.row - 1)][state.col]
+        elif action.get_index() == 1:
+           return self.grid[state.row][min(self.size - 1, state.col + 1)]
+        elif action.get_index() == 2:
+            return self.grid[min(self.size - 1, state.row + 1)][state.col]
+        return self.grid[state.row][max(0, state.col - 1)]
 
 # class representing the agent
 class Agent:
-    def __init__(self, world, config):
+    def __init__(self, world: World, config: Config):
         self.world = world
         self.config = config
-        # Q-table stores the learned values for every state-action pair
-        # initialised to zeros at start
-        self.q_table = np.zeros((world.size, world.size, len(Action)))
 
-    def choose_action(self, state):
-        """Decides an action using the epsilon-greedy strategy."""
+    def choose_action(self, state: State):
+        # This method now returns a full Action object, not just an integer
         if random.uniform(0, 1) < self.config.exploration_rate:
-            return random.choice(list(Action)).value
-        # Otherwise, exploit current knowledge by choosing the best-known action
+            return Action.get_random()
         else:
-            return np.argmax(self.q_table[state])
+            return state.get_max_action()
 
-    def update_q_value(self, state, action, reward, next_state):
-        current_q = self.q_table[state][action]
-        # Estimate future rewards by finding the max Q-value for the next state
-        # If the next state is disallowed, there is no future reward
-        max_future_q = 0.0 if self.world.is_terminal_state(next_state) else np.max(self.q_table[next_state])
-        # The target value is what the Q-value should be according to this new information.
-        target_q = reward + self.config.discount_factor * max_future_q
-        # Update the current Q-value, moving it slightly towards the target
+    def update_q_value(self, state: State, action: Action, next_state: State):
+        current_q = state.get_q_value(action)
+        target_q = next_state.get_reward() + self.config.discount_factor * next_state.max_future_q()
         new_q = current_q + self.config.learning_rate * (target_q - current_q)
-        self.q_table[state][action] = new_q
+        state.set_q_value(action, new_q)
 
-# class for training process
 class Trainer:
-    def __init__(self, agent, world, config):
+    def __init__(self, agent: Agent, world: World, config: Config):
         self.agent = agent
         self.world = world
         self.config = config
         self.episode_rewards = []
 
     def train(self):
-        """Runs the main training loop for a set number of episodes"""
         for episode in range(self.config.episodes):
-            state = self.world.start_state
+            state: State = self.world.get_start_state()
             total_reward = 0
             done = False
             steps = 0
-
-            while not done and steps < 100:
+            while not done and steps < self.config.steps:
+                # The agent passes a State object and receives an Action object in return
                 action = self.agent.choose_action(state)
-                next_state = self.world.get_next_state(state, action)
-                reward = self.world.get_reward(next_state)
-                done = self.world.is_terminal_state(next_state)
-                self.agent.update_q_value(state, action, reward, next_state)
+                # The world is given the current State and an Action object
+                next_state: State = self.world.get_next_state(state, action)
+                # print(f"state - {state.to_string()}, action - {action.name()}, next state - {next_state.to_string()}, {state.q_values}")
+                reward = next_state.get_reward()
+                done = next_state.is_terminal()
+                # The agent's knowledge is updated based on the outcome.
+                self.agent.update_q_value(state, action, next_state)
                 state = next_state
                 total_reward += reward
                 steps += 1
-
             self.episode_rewards.append(total_reward)
-
-            if (episode + 1) % 100 == 0:
-                avg_reward = np.mean(self.episode_rewards[-100:])
-                print(f"Episode {episode + 1}/{self.config.episodes} | Avg Reward (last 100): {avg_reward:.2f}")
-
+            if (episode + 1) % 1 == 0:
+                avg_reward = np.mean(self.episode_rewards[-10000:])
+                print(f"Episode {episode + 1}/{self.config.episodes} | Avg Reward (last 10000): {avg_reward:.2f}")
         print("\nTraining finished.")
 
-    def plot_results(self):
-        """Creates and displays plots for the learning curve and Q-value directions."""
-        # Create a figure with two subplots, arranged side-by-side.
-        fig, axs = plt.subplots(1, 2, figsize=(15, 6))
-        fig.suptitle('Q-Learning Performance Analysis', fontsize=16)
+# class created to separate visualisation from training
+class Visualiser:
+    def __init__(self, agent: Agent, world: World, config: Config, episode_rewards: list):
+        self.agent = agent
+        self.world = world
+        self.config = config
+        self.episode_rewards = episode_rewards
 
-        # 1. Learning Curve Plot
-        moving_avg_rewards = [np.mean(self.episode_rewards[i:i+100]) for i in range(0, len(self.episode_rewards), 100)]
-        episodes_chunked = list(range(100, self.config.episodes + 1, 100))
+    def plot_q_values(self):
+        # Create a single figure and axis for the plot.
+        fig, ax = plt.subplots(figsize=(8, 8))
+        ax.set_title('Q-Values per State-Action')
 
-        axs[0].plot(episodes_chunked, moving_avg_rewards, color='steelblue')
-        axs[0].set_title('Learning Curve')
-        axs[0].set_xlabel('Episode')
-        axs[0].set_ylabel('Average Reward (per 100 episodes)')
-        axs[0].grid(True, linestyle='--', alpha=0.6)
-
-        # 2. Q-Value Directional Plot
-        # shows the agent's preference for each action in every state
-        # by displaying the numerical Q-value for each direction.
-        axs[1].set_title('Q-Values per State-Action')
-        axs[1].set_aspect('equal')
-        axs[1].set_xticks([])
-        axs[1].set_yticks([])
-        axs[1].invert_yaxis() # Match grid orientation
+        ax.set_aspect('equal')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.invert_yaxis() # Match grid orientation
 
         for r in range(self.world.size):
             for c in range(self.world.size):
-                # Draw grid lines for each cell
-                axs[1].add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
+                state = self.world.grid[r][c]
+                # Draw grid lines for each cell.
+                ax.add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
 
                 # Mark Goal and Penalty states with 'G' and 'X'.
-                if self.world.get_reward((r, c)) == 1:
-                    axs[1].text(c + 0.5, r + 0.5, 'G', ha='center', va='center', fontsize=20, color='green')
+                if state.get_reward() == 1:
+                    ax.text(c + 0.5, r + 0.5, 'G', ha='center', va='center', fontsize=20, color='green')
                     continue
-                if self.world.get_reward((r, c)) == -1:
-                    axs[1].text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=20, color='red')
+                if state.get_reward() == -1:
+                    ax.text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=20, color='red')
                     continue
 
-                # Get the raw Q-values for the current state
-                q_vals = self.agent.q_table[r, c]
-
-                # Define a bounding box for the text to improve readability against the arrows.
+                q_vals = state.q_values
                 bbox_props = dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.7)
 
+                positions = {
+                    'Up':   {'x': c + 0.5, 'y': r + 0.25, 'ha': 'center', 'va': 'center', 'arrow_x': c + 0.5, 'arrow_y': r + 0.4, 'dx': 0, 'dy': -0.1},
+                    'Right':{'x': c + 0.75, 'y': r + 0.5, 'ha': 'center', 'va': 'center', 'arrow_x': c + 0.6, 'arrow_y': r + 0.5, 'dx': 0.1, 'dy': 0},
+                    'Down': {'x': c + 0.5, 'y': r + 0.75, 'ha': 'center', 'va': 'center', 'arrow_x': c + 0.5, 'arrow_y': r + 0.6, 'dx': 0, 'dy': 0.1},
+                    'Left': {'x': c + 0.25, 'y': r + 0.5, 'ha': 'center', 'va': 'center', 'arrow_x': c + 0.4, 'arrow_y': r + 0.5, 'dx': -0.1, 'dy': 0}
+                }
+
                 # Draw small arrows and the corresponding Q-value text for each action.
-                # Up
-                axs[1].text(c + 0.5, r + 0.25, f"{q_vals[Action.up.value]:.2f}", ha='center', va='center', fontsize=8, bbox=bbox_props)
-                axs[1].arrow(c + 0.5, r + 0.4, 0, -0.1, head_width=0.07, color='grey', alpha=0.7)
-                # Right
-                axs[1].text(c + 0.75, r + 0.5, f"{q_vals[Action.right.value]:.2f}", ha='center', va='center', fontsize=8, bbox=bbox_props)
-                axs[1].arrow(c + 0.6, r + 0.5, 0.1, 0, head_width=0.07, color='grey', alpha=0.7)
-                # Down
-                axs[1].text(c + 0.5, r + 0.75, f"{q_vals[Action.down.value]:.2f}", ha='center', va='center', fontsize=8, bbox=bbox_props)
-                axs[1].arrow(c + 0.5, r + 0.6, 0, 0.1, head_width=0.07, color='grey', alpha=0.7)
-                # Left
-                axs[1].text(c + 0.25, r + 0.5, f"{q_vals[Action.left.value]:.2f}", ha='center', va='center', fontsize=8, bbox=bbox_props)
-                axs[1].arrow(c + 0.4, r + 0.5, -0.1, 0, head_width=0.07, color='grey', alpha=0.7)
+                for i in range(4):
+                    action = Action(i)
+                    pos = positions[action.name()]
+                    ax.text(pos['x'], pos['y'], f"{q_vals[i]:.2f}", ha=pos['ha'], va=pos['va'], fontsize=8, bbox=bbox_props)
+                    ax.arrow(pos['arrow_x'], pos['arrow_y'], pos['dx'], pos['dy'], head_width=0.07, color='grey', alpha=0.7)
 
-        axs[1].set_xlim(0, self.world.size)
-        axs[1].set_ylim(self.world.size, 0)
-
-        # Display the plots.
-        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        ax.set_xlim(0, self.world.size)
+        ax.set_ylim(self.world.size, 0)
+        plt.tight_layout()
         plt.show()
 
     def display_results(self):
-        """Visualises the learned policy and prints final performance metrics."""
         print("\nLearned Policy (Best move from each cell):")
-        action_symbols = ['↑', '→', '↓', '←']
         for r in range(self.world.size):
             row_str = ""
-            for c in range(self.world.size):
-                if self.world.get_reward((r, c)) == 1: row_str += " G  "
-                elif self.world.get_reward((r, c)) == -1: row_str += " X  "
-                else: row_str += f" {action_symbols[np.argmax(self.agent.q_table[(r, c)])]}  "
+            for c in range(config.grid_size):
+                state = self.world.grid[r][c]
+                if state.get_reward() == 1: row_str += " G  "
+                elif state.get_reward() == -1: row_str += " X  "
+                else:
+                    best_action = state.get_max_action()
+                    row_str += f" {best_action.symbol()}  "
             print(row_str)
 
         final_avg_reward = np.mean(self.episode_rewards[-100:])
         success_rate = sum(r > 0 for r in self.episode_rewards) / self.config.episodes * 100
-        print(f"\nFinal 100-episode average reward: {final_avg_reward:.2f}")
+        print(f"\nFinal {config.episodes} episode average reward: {final_avg_reward:.2f}")
         print(f"Success rate (reaching goal): {success_rate:.1f}%")
 
-        # Call the new method to show the graphical plots.
-        self.plot_results()
+        # Call the method to show the graphical plot.
+        self.plot_q_values()
 
 # Main execution block
-# 1. Create the configuration object.
 config = Config()
-
-# 2. Initialise the core components, World and Agent.
-world = World()
+world = World(config)
 agent = Agent(world, config)
-
-# 3. Create the Trainer, which manages the interaction between the Agent and World.
 trainer = Trainer(agent, world, config)
 trainer.train()
 
-# 4. Once training is finished, display the results.
-trainer.display_results()
+# A Visualiser object is created here, receiving the trained agent and results.
+visualiser = Visualiser(agent, world, config, trainer.episode_rewards)
+visualiser.display_results()
