@@ -1,10 +1,12 @@
 from matplotlib import pyplot as plt
 from matplotlib.animation import FuncAnimation
-import numpy as np  #type:ignore
+from matplotlib.widgets import Button
+import numpy as np
 import random
-import matplotlib.animation as animation
 
-# Stores all hyperparameters for the simulation.
+
+# A data class holding all hyperparameters for the simulation.
+# Passed into objects that require simulation parameters.
 class Config:
     def __init__(self):
         self.learning_rate = 0.1
@@ -14,139 +16,154 @@ class Config:
         self.steps = 20
         self.grid_size = 4
 
-# Represents a possible action the agent can take.
+
+# Represents a discrete action (Up, Down, Left, Right).
+# Initialised with an integer index. Provides methods to get names and symbols.
 class Action:
     def __init__(self, action_index: int):
         self.action_index = action_index
-        return
 
-    def name(self):
+    # Returns the string name of the action
+    def name(self) -> str:
         return ['Up', 'Right', 'Down', 'Left'][self.action_index]
 
-    def get_index(self):
+    # Returns the integer index of the action
+    def get_index(self) -> int:
         return self.action_index
 
-    def symbol(self):
+    # Returns a symbol for the action
+    def symbol(self) -> str:
         return ['↑', '→', '↓', '←'][self.action_index]
 
+    # Factory method to generate a random action. Returns an Action instance
     @staticmethod
     def get_random():
         return Action(random.randint(0, 3))
 
-# Represents a single state (a cell) in the grid, holding its reward and Q-values.
+
+# Represents a single state (a cell) in the grid.
+# Initialised with its coordinates and reward. Holds the Q-values for that state.
 class State:
     def __init__(self, row: int, col: int, reward: int):
-        self.row = row
-        self.col = col
-        self.reward = reward
-        self.q_values = np.zeros(4)
+        self.row, self.col, self.reward = row, col, reward
+        self.q_values = np.zeros(4)  # Holds Q-values for actions 
 
-    def get_reward(self):
+    # Returns the state's intrinsic reward value.
+    def get_reward(self) -> int:
         return self.reward
 
-    def get_q_value(self, action: Action):
+    # Takes an Action object and returns the corresponding Q-value (float)
+    def get_q_value(self, action: Action) -> float:
         return self.q_values[action.get_index()]
 
+    # Takes an Action and a float, updating the Q-value for that action
     def set_q_value(self, action: Action, q_value: float):
         self.q_values[action.get_index()] = q_value
 
-    def get_max_action(self):
+    # Returns the Action with the highest Q-value from this state
+    def get_max_action(self) -> Action:
         return Action(np.argmax(self.q_values))
 
-    def is_terminal(self):
+    # Returns true if the state is a terminal one 
+    def is_terminal(self) -> bool:
         return self.reward != 0
 
-    def max_future_q(self):
+    # Returns the maximum Q-value available from this state
+    def max_future_q(self) -> float:
         return 0.0 if self.is_terminal() else np.max(self.q_values)
 
-    def to_string(self):
-        return f"({self.row} ,{self.col})"
+    # Returns a string representation of the state's coordinates
+    def to_string(self) -> str:
+        return f"({self.row}, {self.col})"
 
-# Defines the environment, including the grid layout, rewards, and state transitions.
+
+# Defines the environment (grid, rewards, and state transition logic)
+# Initialised with a Config object.
 class World:
     def __init__(self, config: Config):
         self.size = config.grid_size
-        self.grid = []
-        for row in range(self.size):
-            cols = []
-            for col in range(self.size):
-                cols.append(State(row, col, self.reward(row, col)))
-            self.grid.append(cols)
+        # The grid is a 2D list of State objects
+        self.grid = [[State(r, c, self.reward(r, c)) for c in range(self.size)] for r in range(self.size)]
 
+    # Returns the designated starting State for each episode
     def get_start_state(self) -> State:
         return self.grid[3][0]
 
-    def reward(self, row: int, col: int):
-        if row == 0 and col == self.size - 1:
-            return +1
-        elif row == 1 and col == 1:
-            return -1
+    # Internal method to define rewards for specific grid coordinates
+    def reward(self, row: int, col: int) -> int:
+        if row == 0 and col == self.size - 1: return +1
+        if row == 1 and col == 1: return -1
         return 0
 
+    # The environment's dynamics model. Takes a State and Action, returns the resulting State
     def get_next_state(self, state: State, action: Action) -> State:
-        if action.get_index() == 0:
-            return self.grid[max(0, state.row - 1)][state.col]
-        elif action.get_index() == 1:
-            return self.grid[state.row][min(self.size - 1, state.col + 1)]
-        elif action.get_index() == 2:
-            return self.grid[min(self.size - 1, state.row + 1)][state.col]
+        if action.get_index() == 0: return self.grid[max(0, state.row - 1)][state.col]
+        if action.get_index() == 1: return self.grid[state.row][min(self.size - 1, state.col + 1)]
+        if action.get_index() == 2: return self.grid[min(self.size - 1, state.row + 1)][state.col]
         return self.grid[state.row][max(0, state.col - 1)]
 
-# Represents the learning agent that decides on actions and updates its Q-values.
+
+# The learning agent. It decides on actions and updates Q-values.
+# Initialised with the World and a Config object.
 class Agent:
     def __init__(self, world: World, config: Config):
         self.world = world
         self.config = config
 
-    # Chooses an action using an epsilon-greedy policy.
-    def choose_action(self, state: State):
-        if random.uniform(0, 1) < self.config.exploration_rate:
-            return Action.get_random()
-        else:
-            return state.get_max_action()
+    # Implements epsilon-greedy policy. Takes a State, returns an Action
+    def choose_action(self, state: State) -> Action:
+        return Action.get_random() if random.uniform(0, 1) < self.config.exploration_rate else state.get_max_action()
 
-    # Updates the Q-value for a state-action pair using the Bellman equation.
+    # Applies the Q-learning update rule. Takes state-action-next_state tuple, modifies Q-value in the state
     def update_q_value(self, state: State, action: Action, next_state: State):
         current_q = state.get_q_value(action)
         target_q = next_state.get_reward() + self.config.discount_factor * next_state.max_future_q()
         new_q = current_q + self.config.learning_rate * (target_q - current_q)
         state.set_q_value(action, new_q)
 
-# Manages the training loop over a set number of episodes.
 class Trainer:
     def __init__(self, agent: Agent, world: World, config: Config):
-        self.agent = agent
-        self.world = world
-        self.config = config
-        self.episode_rewards = []
+        self.agent, self.world, self.config = agent, world, config
+        self.episode_rewards = []  # Stores total reward for each episode
+        self.current_episode = 0   # Add a counter for the current episode
+        self.latest_path = None    # Store the path of the most recent episode
+
+    def run_one_episode(self):
+        """Runs a single episode of the simulation and stores the results."""
+        state = self.world.get_start_state()
+        total_reward, done, steps = 0, False, 0
+        path_x, path_y = [state.col + 0.5], [state.row + 0.5]
+
+        while not done and steps < self.config.steps:
+            action = self.agent.choose_action(state)
+            next_state = self.world.get_next_state(state, action)
+            self.agent.update_q_value(state, action, next_state)
+            state = next_state
+            total_reward += state.get_reward()
+            done = state.is_terminal()
+            steps += 1
+            path_x.append(state.col + 0.5)
+            path_y.append(state.row + 0.5)
+            
+        self.episode_rewards.append(total_reward)
+        self.latest_path = (path_x, path_y) # Store the path for the visualiser
+        self.current_episode += 1
 
     def train(self):
-        for episode in range(self.config.episodes):
-            state: State = self.world.get_start_state()
-            total_reward = 0
-            done = False
-            steps = 0
-            while not done and steps < self.config.steps:
-                action = self.agent.choose_action(state)
-                next_state: State = self.world.get_next_state(state, action)
-                reward = next_state.get_reward()
-                done = next_state.is_terminal()
-                self.agent.update_q_value(state, action, next_state)
-                state = next_state
-                total_reward += reward
-                steps += 1
-            self.episode_rewards.append(total_reward)
+        """Runs the main training loop over all episodes."""
+        while self.current_episode < self.config.episodes:
+            self.run_one_episode()
         print("\nTraining finished.")
 
-# Handles the visualisation of the final policy and Q-values.
+
+# Handles the static visualisation of the final learned policy and Q-values
+# Initialised with the trained Agent and its environment
 class Visualiser:
     def __init__(self, agent: Agent, world: World, config: Config, episode_rewards: list):
-        self.agent = agent
-        self.world = world
-        self.config = config
+        self.agent, self.world, self.config = agent, world, config
         self.episode_rewards = episode_rewards
 
-    # Creates a graphical plot of the Q-values for each state-action pair.
+    # Creates and shows a plot of the Q-values for each state-action pair.
     def plot_q_values(self):
         fig, ax = plt.subplots(figsize=(8, 8))
         ax.set_title('Q-Values per State-Action')
@@ -188,15 +205,17 @@ class Visualiser:
         plt.tight_layout()
         plt.show()
 
-    # Displays the final learned policy and summary statistics.
+    # Prints summary statistics and the final policy grid to the console
     def display_results(self):
         print("\nLearned Policy (Best move from each cell):")
         for r in range(self.world.size):
             row_str = ""
-            for c in range(config.grid_size):
+            for c in range(self.config.grid_size):
                 state = self.world.grid[r][c]
-                if state.get_reward() == 1: row_str += " G  "
-                elif state.get_reward() == -1: row_str += " X  "
+                if state.get_reward() == 1:
+                    row_str += " G  "
+                elif state.get_reward() == -1:
+                    row_str += " X  "
                 else:
                     best_action = state.get_max_action()
                     row_str += f" {best_action.symbol()}  "
@@ -204,53 +223,224 @@ class Visualiser:
 
         final_avg_reward = np.mean(self.episode_rewards[-100:])
         success_rate = sum(r > 0 for r in self.episode_rewards) / self.config.episodes * 100
-        print(f"\nFinal {config.episodes} episode average reward: {final_avg_reward:.2f}")
+        print(f"\nFinal {self.config.episodes} episode average reward: {final_avg_reward:.2f}")
         print(f"Success rate (reaching goal): {success_rate:.1f}%")
         self.plot_q_values()
-        
-class livevisualiser:
-    def __init__(self, trainer: Trainer, config: Config):
+
+class LiveVisualiser:
+    """
+    Couples with a Trainer instance to visualise the training process. only handles plotting.
+    """
+    def __init__(self, trainer: Trainer, world: World, config: Config):
+        """
+        Initialises the visualiser.
+        Takes in the trainer (as the engine), world (for drawing), and config.
+        """
+        # Core Components 
         self.trainer = trainer
-        self.world = trainer.world
+        self.world = world
         self.config = config
-        self.fig, self.ax = plt.subplots(figsize=(8,8))
-        self.frame_info = [] # holds all info re arrows and text
-        self.training_complete = False # should show final state at the end of animation
+
+        # Plotting and Animation State 
+        self.fig, self.ax_grid = plt.subplots(1, 1, figsize=(8, 8))
+        self.frame_info = []         # Holds artists to be cleared each frame
+        self.path_line = None        # Holds the artist for the agent's path
+        self.success_text_artist = None # Holds the persistent success rate text
+        self.last_success_rate = 0.0
+        self.anim = None
+        self.is_paused = False
+        self.pause_button = None
+
+        # Drawing Constants 
+        self.arrow_base_size = 0.05
+        self.arrow_size_multiplier = 0.1
+        self.arrow_head_scale = 0.8
+        self.transparency_base = 0.3
+        self.transparency_multiplier = 0.7
+        self.q_value_fontsize = 7
+        self.animation_interval_ms = 1000
+
+        # Pre-calculation 
+        self.arrow_params = {
+            0: {'dx': 0, 'dy': -0.15, 'x_offset': 0.5, 'y_offset': 0.35},
+            1: {'dx': 0.15, 'dy': 0, 'x_offset': 0.65, 'y_offset': 0.5},
+            2: {'dx': 0, 'dy': 0.15, 'x_offset': 0.5, 'y_offset': 0.65},
+            3: {'dx': -0.15, 'dy': 0, 'x_offset': 0.35, 'y_offset': 0.5}
+        }
+        self.text_positions = {}
+        for r in range(self.config.grid_size):
+            for c in range(self.config.grid_size):
+                for i in range(4):
+                    params = self.arrow_params[i]
+                    text_x = c + params['x_offset'] + params['dx'] * 0.7
+                    text_y = r + params['y_offset'] + params['dy'] * 0.7
+                    self.text_positions[(r, c, i)] = (text_x, text_y)
+
+        # Draw the static background
+        self.setup_plot()
+
+    def setup_plot(self):
+        """Sets up the static elements of the plot that don't change."""
+        self.fig.subplots_adjust(bottom=0.1)
+        self.ax_grid.set_title('Q-Learning Progress', fontsize=14)
+        self.ax_grid.set_aspect('equal')
+        self.ax_grid.set_xticks([])
+        self.ax_grid.set_yticks([])
+        self.ax_grid.invert_yaxis()
+        self.ax_grid.set_xlim(0, self.world.size)
+        self.ax_grid.set_ylim(self.world.size, 0)
+
+        for r in range(self.world.size):
+            for c in range(self.world.size):
+                self.ax_grid.add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
+                state = self.world.grid[r][c]
+                if state.get_reward() == 1:
+                    self.ax_grid.text(c + 0.5, r + 0.5, 'G', ha='center', va='center', fontsize=20, color='green', weight='bold')
+                elif state.get_reward() == -1:
+                    self.ax_grid.text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=20, color='red', weight='bold')
         
-    def update_frame(self, frame: int): # performs single step in the animation
-        if self.training_complete:
-            return
-            
-        for info in self.frame_info: # remove all info from previous frame to make way for next one
+        plt.tight_layout(rect=[0, 0.05, 1, 1])
+
+    def toggle_pause(self, event):
+        """Handles the pause/resume button click event."""
+        if self.is_paused:
+            self.anim.resume()
+            self.pause_button.label.set_text('Pause')
+        else:
+            self.anim.pause()
+            self.pause_button.label.set_text('Resume')
+        self.is_paused = not self.is_paused
+
+    def update_frame(self, frame: int) -> list:
+        """
+        Tells the trainer to run an episode, then redraws the simulation state.
+        This method contains NO Q-learning logic itself.
+        """
+        # 1. Advance the simulation by telling the Trainer to run one episode
+        if self.trainer.current_episode < self.config.episodes:
+            self.trainer.run_one_episode()
+
+        # 2. Cleanup all artists from the previous frame
+        for info in self.frame_info:
             info.remove()
-        self.frame_info[]
-        
-        all_q_values = np.array([s.q_values for row in self.world.grid for s in row]).flatten()
-        q_min, q_max = np.min(all_q_values), np.max(all_q_values)
-        
-        for r in range(self.world.size): #iterate through grid
+        self.frame_info.clear()
+
+        if self.path_line:
+            self.path_line.remove()
+            self.path_line = None
+
+        # 3. Redraw the path from the trainer's last-run episode
+        if self.trainer.latest_path:
+            path_x, path_y = self.trainer.latest_path
+            if len(path_x) > 1:
+                self.path_line, = self.ax_grid.plot(path_x, path_y, 'r-', linewidth=2, alpha=0.8,
+                                                      marker='o', markersize=4, markerfacecolor='red',
+                                                      markeredgecolor='darkred', markeredgewidth=0.5)
+
+        # To visualise Q-values, find the largest absolute value for symmetric normalization
+        all_q_values = [q for row in self.world.grid for s in row if not s.is_terminal() for q in s.q_values]
+        # Find the maximum absolute value to create a symmetric range [-max, +max]
+        max_abs_q = max(abs(q) for q in all_q_values) if all_q_values else 1.0
+        if max_abs_q == 0: max_abs_q = 1.0 # Avoid division by zero
+
+        # Pre-create the bbox dict to avoid recreating it multiple times
+        text_bbox = dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.8)
+
+        # Iterate through the grid and draw the Q-value arrows for each state-action pair
+        for r in range(self.world.size):
             for c in range(self.world.size):
                 state = self.world.grid[r][c]
-                
-                if state.is_terminal(): continue
-                
+                if state.is_terminal():
+                    continue
+
                 for i in range(4):
-                    action = Action(i)
-                    q_val = state.get_q_value(action)
-                    
-                    normalise_q = (q_val - q_min)/(q_max - q_min + 1e-9) # normalise to 0-1 add epsilon to avoid div by 0
-                    
-                    arrow_size = 0.05 +normalise_q * 0.15
-                    arrow
+                    q_val = state.q_values[i]
+
+                    # --- NEW SYMMETRIC NORMALIZATION ---
+                    # This maps q_val from [-max_abs_q, +max_abs_q] to a 0-1 range
+                    # where negative values are 0-0.5, 0 is 0.5, and positive are 0.5-1.
+                    normalized_q = (q_val / max_abs_q) * 0.5 + 0.5
                 
+                    # --- NEW SIZE CALCULATION ---
+                    # Size is based on distance from the neutral center (0.5)
+                    # abs(normalized_q - 0.5) gives a value from 0 to 0.5. Multiplying by 2 scales it to 0-1.
+                    size_factor = abs(normalized_q - 0.5) * 2
+                    arrow_size = self.arrow_base_size + size_factor * self.arrow_size_multiplier
+                
+                    # Color now correctly maps: Red -> Yellow(Neutral) -> Green
+                    color = plt.cm.RdYlGn(normalized_q)
+                
+                    # Alpha can be based on the same size factor to make neutral arrows more transparent
+                    alpha = self.transparency_base + size_factor * self.transparency_multiplier
+
+                    # (The rest of the drawing code is the same as before)
+                    params = self.arrow_params[i]
+                    arrow = self.ax_grid.arrow(c + params['x_offset'], r + params['y_offset'],
+                                           params['dx'] * size_factor, params['dy'] * size_factor, # Scale arrow length by size_factor
+                                           head_width=arrow_size, head_length=arrow_size * self.arrow_head_scale,
+                                           fc=color, ec=color, alpha=alpha)
+                    self.frame_info.append(arrow)
+
+                    text_x, text_y = self.text_positions[(r, c, i)]
+                    text = self.ax_grid.text(text_x, text_y, f"{q_val:.1f}", ha='center', va='center',
+                                         fontsize=self.q_value_fontsize, bbox=text_bbox)
+                    self.frame_info.append(text)
+
+        episode_text = self.ax_grid.text(0.02, 0.98, f"Episode: {self.trainer.current_episode}/{self.config.episodes}",
+                                         transform=self.ax_grid.transAxes, ha='left', va='top',
+                                         bbox=dict(boxstyle="round,pad=0.3", fc="yellow", alpha=0.7), fontsize=10)
+        self.frame_info.append(episode_text)
+
+        # Update and display the persistent success rate text
+        rewards = self.trainer.episode_rewards
+        if rewards and (self.trainer.current_episode % 10 == 0 or self.trainer.current_episode == self.config.episodes):
+            self.last_success_rate = sum(r > 0 for r in rewards) / len(rewards) * 100
+
+        if self.success_text_artist is None:
+            self.success_text_artist = self.ax_grid.text(0.98, 0.98, "", transform=self.ax_grid.transAxes,
+                                                         ha='right', va='top',
+                                                         bbox=dict(boxstyle="round,pad=0.3", fc="lightblue", alpha=0.7),
+                                                         fontsize=10)
         
+        self.success_text_artist.set_text(f"Success Rate: {self.last_success_rate:.1f}%")
+
+        return self.frame_info + [self.path_line]
+
+    def animate_training(self):
+        """Creates and returns the animation object and the button."""
+        self.anim = FuncAnimation(self.fig, self.update_frame, frames=self.config.episodes,
+                                  interval=self.animation_interval_ms, repeat=False, blit=False)
+
+        button_ax = self.fig.add_axes([0.4, 0.02, 0.2, 0.05])
+        self.pause_button = Button(button_ax, 'Pause', color='lightgoldenrodyellow', hovercolor='0.975')
+        self.pause_button.on_clicked(self.toggle_pause)
         
-# Main execution block: initialises and runs the simulation.
+        return self.anim
+
+# Initialise the core components
 config = Config()
 world = World(config)
 agent = Agent(world, config)
-trainer = Trainer(agent, world, config)
-trainer.train()
 
-visualiser = Visualiser(agent, world, config, trainer.episode_rewards)
-visualiser.display_results()
+# Handle user choice for visualisation mode
+print("Select visualisation mode:")
+print("1. Live ")
+print("2. Final results ")
+choice = input("1 or 2: ")
+
+if choice == "1":
+    # 1. Create the core components as before
+    trainer = Trainer(agent, world, config)
+
+    # 2. Create the visualiser and PASS IT THE TRAINER
+    live_visualiser = LiveVisualiser(trainer, world, config)
+    
+    # 3. Run the animation
+    anim = live_visualiser.animate_training()
+    plt.show()
+else:
+    # Run the standard training and show final results
+    trainer = Trainer(agent, world, config)
+    trainer.train()
+    visualiser = Visualiser(agent, world, config, trainer.episode_rewards)
+    visualiser.display_results()
