@@ -1,7 +1,7 @@
-from matplotlib import pyplot as plt
-from matplotlib.animation import FuncAnimation
-from matplotlib.widgets import Button
-import numpy as np
+from matplotlib import pyplot as plt #type:ignore
+from matplotlib.animation import FuncAnimation #type:ignore
+from matplotlib.widgets import Button #type:ignore
+import numpy as np #type:ignore
 import random
 
 
@@ -356,29 +356,26 @@ class LiveVisualiser:
                 for i in range(4):
                     q_val = state.q_values[i]
 
-                    # --- NEW SYMMETRIC NORMALIZATION ---
                     # This maps q_val from [-max_abs_q, +max_abs_q] to a 0-1 range
                     # where negative values are 0-0.5, 0 is 0.5, and positive are 0.5-1.
                     normalized_q = (q_val / max_abs_q) * 0.5 + 0.5
                 
-                    # --- NEW SIZE CALCULATION ---
                     # Size is based on distance from the neutral center (0.5)
                     # abs(normalized_q - 0.5) gives a value from 0 to 0.5. Multiplying by 2 scales it to 0-1.
                     size_factor = abs(normalized_q - 0.5) * 2
                     arrow_size = self.arrow_base_size + size_factor * self.arrow_size_multiplier
                 
-                    # Color now correctly maps: Red -> Yellow(Neutral) -> Green
+                    # Red -> Yellow(Neutral) -> Green
                     color = plt.cm.RdYlGn(normalized_q)
                 
-                    # Alpha can be based on the same size factor to make neutral arrows more transparent
-                    alpha = self.transparency_base + size_factor * self.transparency_multiplier
+                    # transparency can be based on the same size factor to make neutral arrows more transparent
+                    transparency = self.transparency_base + size_factor * self.transparency_multiplier
 
-                    # (The rest of the drawing code is the same as before)
                     params = self.arrow_params[i]
                     arrow = self.ax_grid.arrow(c + params['x_offset'], r + params['y_offset'],
                                            params['dx'] * size_factor, params['dy'] * size_factor, # Scale arrow length by size_factor
                                            head_width=arrow_size, head_length=arrow_size * self.arrow_head_scale,
-                                           fc=color, ec=color, alpha=alpha)
+                                           fc=color, ec=color, alpha=transparency)
                     self.frame_info.append(arrow)
 
                     text_x, text_y = self.text_positions[(r, c, i)]
