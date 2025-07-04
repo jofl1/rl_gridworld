@@ -11,11 +11,10 @@ class Config:
     def __init__(self):
         self.learning_rate = 0.1
         self.discount_factor = 0.9
-        self.exploration_rate = 0.1
+        self.exploration_rate = 0.5
         self.episodes = 10000
-        self.steps = 20
-        self.grid_size = 4
-
+        self.steps = 30
+        self.grid_size = 8
 
 # Represents a discrete action (Up, Down, Left, Right).
 # Initialised with an integer index. Provides methods to get names and symbols.
@@ -81,25 +80,26 @@ class State:
 # Initialised with a Config object.
 class World:
     def __init__(self, config: Config):
-        self.size = config.grid_size
+        self.config = config
         # The grid is a 2D list of State objects
-        self.grid = [[State(r, c, self.reward(r, c)) for c in range(self.size)] for r in range(self.size)]
+        self.grid = [[State(r, c, self.reward(r, c)) for c in range(self.config.grid_size)] for r in range(self.config.grid_size)]
 
     # Returns the designated starting State for each episode
     def get_start_state(self) -> State:
-        return self.grid[3][0]
+    
+        return self.grid[self.config.grid_size - 1][0]
 
     # Internal method to define rewards for specific grid coordinates
     def reward(self, row: int, col: int) -> int:
-        if row == 0 and col == self.size - 1: return +1
+        if row == 0 and col == self.config.grid_size - 1: return +1
         if row == 1 and col == 1: return -1
         return 0
 
     # The environment's dynamics model. Takes a State and Action, returns the resulting State
     def get_next_state(self, state: State, action: Action) -> State:
         if action.get_index() == 0: return self.grid[max(0, state.row - 1)][state.col]
-        if action.get_index() == 1: return self.grid[state.row][min(self.size - 1, state.col + 1)]
-        if action.get_index() == 2: return self.grid[min(self.size - 1, state.row + 1)][state.col]
+        if action.get_index() == 1: return self.grid[state.row][min(self.config.grid_size - 1, state.col + 1)]
+        if action.get_index() == 2: return self.grid[min(self.config.grid_size - 1, state.row + 1)][state.col]
         return self.grid[state.row][max(0, state.col - 1)]
 
 
@@ -172,8 +172,8 @@ class Visualiser:
         ax.set_yticks([])
         ax.invert_yaxis()
 
-        for r in range(self.world.size):
-            for c in range(self.world.size):
+        for r in range(self.config.grid_size):
+            for c in range(self.config.grid_size):
                 state = self.world.grid[r][c]
                 ax.add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
 
@@ -200,15 +200,15 @@ class Visualiser:
                     ax.text(pos['x'], pos['y'], f"{q_vals[i]:.2f}", ha=pos['ha'], va=pos['va'], fontsize=8, bbox=bbox_props)
                     ax.arrow(pos['arrow_x'], pos['arrow_y'], pos['dx'], pos['dy'], head_width=0.07, color='grey', alpha=0.7)
 
-        ax.set_xlim(0, self.world.size)
-        ax.set_ylim(self.world.size, 0)
+        ax.set_xlim(0, self.config.grid_size)
+        ax.set_ylim(self.config.grid_size, 0)
         plt.tight_layout()
         plt.show()
 
     # Prints summary statistics and the final policy grid to the console
     def display_results(self):
         print("\nLearned Policy (Best move from each cell):")
-        for r in range(self.world.size):
+        for r in range(self.config.grid_size):
             row_str = ""
             for c in range(self.config.grid_size):
                 state = self.world.grid[r][c]
@@ -287,11 +287,11 @@ class LiveVisualiser:
         self.ax_grid.set_xticks([])
         self.ax_grid.set_yticks([])
         self.ax_grid.invert_yaxis()
-        self.ax_grid.set_xlim(0, self.world.size)
-        self.ax_grid.set_ylim(self.world.size, 0)
+        self.ax_grid.set_xlim(0, self.config.grid_size)
+        self.ax_grid.set_ylim(self.config.grid_size, 0)
 
-        for r in range(self.world.size):
-            for c in range(self.world.size):
+        for r in range(self.config.grid_size):
+            for c in range(self.config.grid_size):
                 self.ax_grid.add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
                 state = self.world.grid[r][c]
                 if state.get_reward() == 1:
@@ -347,8 +347,8 @@ class LiveVisualiser:
         text_bbox = dict(boxstyle="round,pad=0.1", fc="white", ec="none", alpha=0.8)
 
         # Iterate through the grid and draw the Q-value arrows for each state-action pair
-        for r in range(self.world.size):
-            for c in range(self.world.size):
+        for r in range(self.config.grid_size):
+            for c in range(self.config.grid_size):
                 state = self.world.grid[r][c]
                 if state.is_terminal():
                     continue
@@ -379,7 +379,7 @@ class LiveVisualiser:
                     self.frame_info.append(arrow)
 
                     text_x, text_y = self.text_positions[(r, c, i)]
-                    text = self.ax_grid.text(text_x, text_y, f"{q_val:.1f}", ha='center', va='center',
+                    text = self.ax_grid.text(text_x, text_y, f"{q_val:.2f}", ha='center', va='center',
                                          fontsize=self.q_value_fontsize, bbox=text_bbox)
                     self.frame_info.append(text)
 

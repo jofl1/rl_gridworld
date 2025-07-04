@@ -14,7 +14,20 @@ class Config:
         self.exploration_rate = 0.1
         self.episodes = 10000
         self.steps = 20
-        self.grid_size = 4
+        self.grid_size = 8
+        
+        # Define walls as a list of (row, col) tuples - empty by default
+        self.walls = []
+        
+        # Example wall configurations (uncomment to test):
+        # Vertical wall in the middle
+        # self.walls = [(r, self.grid_size // 2) for r in range(1, self.grid_size - 1)]
+        
+        # L-shaped wall
+        # self.walls = [(1, 2), (2, 2), (2, 1)]
+        
+        # Maze-like configuration
+        self.walls = [(0, 1), (1, 1), (1, 3), (2, 3), (3, 1), (3, 2)]
 
 
 # Represents a discrete action (Up, Down, Left, Right).
@@ -78,29 +91,67 @@ class State:
 
 
 # Defines the environment (grid, rewards, and state transition logic)
-# Initialised with a Config object.
+# Now supports walls while maintaining scalability
 class World:
     def __init__(self, config: Config):
         self.size = config.grid_size
-        # The grid is a 2D list of State objects
-        self.grid = [[State(r, c, self.reward(r, c)) for c in range(self.size)] for r in range(self.size)]
+        self.walls = set(config.walls)  # Convert to set for O(1) lookup
+        
+        # Create the grid layout dynamically
+        self.grid_layout = [[0 for _ in range(self.size)] for _ in range(self.size)]
+        
+        # Set goal at top-right (scalable)
+        self.grid_layout[0][self.size - 1] = 1
+        
+        # Set fire (scalable) - only if the position exists in the grid
+        if self.size > 1:
+            self.grid_layout[7][7] = -1
+        
+        # Set walls
+        for (r, c) in self.walls:
+            if 0 <= r < self.size and 0 <= c < self.size:
+                self.grid_layout[r][c] = 2
+        
+        # Dictionary to store State objects for traversable cells only
+        self.states = {}
+        
+        # Create State objects only for non-wall cells
+        for r in range(self.size):
+            for c in range(self.size):
+                if (r, c) not in self.walls:
+                    self.states[(r, c)] = State(r, c, self.reward(r, c))
 
-    # Returns the designated starting State for each episode
+    # Returns the designated starting State for each episode (scalable)
     def get_start_state(self) -> State:
-        return self.grid[3][0]
+        return self.states[(self.size - 1, 0)]
 
-    # Internal method to define rewards for specific grid coordinates
+    # Internal method to define rewards for specific grid coordinates (scalable)
     def reward(self, row: int, col: int) -> int:
-        if row == 0 and col == self.size - 1: return +1
-        if row == 1 and col == 1: return -1
+        if row == 0 and col == self.size - 1: return +1  # Goal at top-right
+        if self.size > 1 and row == 1 and col == 1: return -1  # Fire at (1,1) if grid is big enough
         return 0
 
     # The environment's dynamics model. Takes a State and Action, returns the resulting State
     def get_next_state(self, state: State, action: Action) -> State:
-        if action.get_index() == 0: return self.grid[max(0, state.row - 1)][state.col]
-        if action.get_index() == 1: return self.grid[state.row][min(self.size - 1, state.col + 1)]
-        if action.get_index() == 2: return self.grid[min(self.size - 1, state.row + 1)][state.col]
-        return self.grid[state.row][max(0, state.col - 1)]
+        # Calculate target coordinates based on action
+        target_row, target_col = state.row, state.col
+        
+        if action.get_index() == 0:  # Up
+            target_row = max(0, state.row - 1)
+        elif action.get_index() == 1:  # Right
+            target_col = min(self.size - 1, state.col + 1)
+        elif action.get_index() == 2:  # Down
+            target_row = min(self.size - 1, state.row + 1)
+        else:  # Left (action.get_index() == 3)
+            target_col = max(0, state.col - 1)
+        
+        # Check if target is a wall
+        if (target_row, target_col) in self.walls:
+            # Wall - agent stays in current state
+            return state
+        else:
+            # Traversable cell - return the State object at target coordinates
+            return self.states[(target_row, target_col)]
 
 
 # The learning agent. It decides on actions and updates Q-values.
@@ -120,6 +171,7 @@ class Agent:
         target_q = next_state.get_reward() + self.config.discount_factor * next_state.max_future_q()
         new_q = current_q + self.config.learning_rate * (target_q - current_q)
         state.set_q_value(action, new_q)
+
 
 class Trainer:
     def __init__(self, agent: Agent, world: World, config: Config):
@@ -157,7 +209,7 @@ class Trainer:
 
 
 # Handles the static visualisation of the final learned policy and Q-values
-# Initialised with the trained Agent and its environment
+# Updated to display walls
 class Visualiser:
     def __init__(self, agent: Agent, world: World, config: Config, episode_rewards: list):
         self.agent, self.world, self.config = agent, world, config
@@ -174,9 +226,16 @@ class Visualiser:
 
         for r in range(self.world.size):
             for c in range(self.world.size):
-                state = self.world.grid[r][c]
                 ax.add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
-
+                
+                # Check if it's a wall
+                if (r, c) in self.world.walls:
+                    ax.add_patch(plt.Rectangle((c, r), 1, 1, fill=True, facecolor='gray', edgecolor='black', lw=0.5))
+                    ax.text(c + 0.5, r + 0.5, '■', ha='center', va='center', fontsize=20, color='darkgray')
+                    continue
+                
+                state = self.world.states[(r, c)]
+                
                 if state.get_reward() == 1:
                     ax.text(c + 0.5, r + 0.5, 'G', ha='center', va='center', fontsize=20, color='green')
                     continue
@@ -211,14 +270,17 @@ class Visualiser:
         for r in range(self.world.size):
             row_str = ""
             for c in range(self.config.grid_size):
-                state = self.world.grid[r][c]
-                if state.get_reward() == 1:
-                    row_str += " G  "
-                elif state.get_reward() == -1:
-                    row_str += " X  "
-                else:
-                    best_action = state.get_max_action()
-                    row_str += f" {best_action.symbol()}  "
+                if (r, c) in self.world.walls:  # Wall
+                    row_str += " ■  "
+                elif (r, c) in self.world.states:
+                    state = self.world.states[(r, c)]
+                    if state.get_reward() == 1:  # Goal
+                        row_str += " G  "
+                    elif state.get_reward() == -1:  # Fire
+                        row_str += " X  "
+                    else:  # Normal cell
+                        best_action = state.get_max_action()
+                        row_str += f" {best_action.symbol()}  "
             print(row_str)
 
         final_avg_reward = np.mean(self.episode_rewards[-100:])
@@ -227,9 +289,11 @@ class Visualiser:
         print(f"Success rate (reaching goal): {success_rate:.1f}%")
         self.plot_q_values()
 
+
 class LiveVisualiser:
     """
     Couples with a Trainer instance to visualise the training process. only handles plotting.
+    Updated to display walls.
     """
     def __init__(self, trainer: Trainer, world: World, config: Config):
         """
@@ -293,11 +357,16 @@ class LiveVisualiser:
         for r in range(self.world.size):
             for c in range(self.world.size):
                 self.ax_grid.add_patch(plt.Rectangle((c, r), 1, 1, fill=False, edgecolor='black', lw=0.5))
-                state = self.world.grid[r][c]
-                if state.get_reward() == 1:
-                    self.ax_grid.text(c + 0.5, r + 0.5, 'G', ha='center', va='center', fontsize=20, color='green', weight='bold')
-                elif state.get_reward() == -1:
-                    self.ax_grid.text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=20, color='red', weight='bold')
+                
+                if (r, c) in self.world.walls:  # Wall
+                    self.ax_grid.add_patch(plt.Rectangle((c, r), 1, 1, fill=True, facecolor='gray', edgecolor='black', lw=0.5))
+                    self.ax_grid.text(c + 0.5, r + 0.5, '■', ha='center', va='center', fontsize=20, color='darkgray', weight='bold')
+                elif (r, c) in self.world.states:
+                    state = self.world.states[(r, c)]
+                    if state.get_reward() == 1:  # Goal
+                        self.ax_grid.text(c + 0.5, r + 0.5, 'G', ha='center', va='center', fontsize=20, color='green', weight='bold')
+                    elif state.get_reward() == -1:  # Fire
+                        self.ax_grid.text(c + 0.5, r + 0.5, 'X', ha='center', va='center', fontsize=20, color='red', weight='bold')
         
         plt.tight_layout(rect=[0, 0.05, 1, 1])
 
@@ -338,7 +407,11 @@ class LiveVisualiser:
                                                       markeredgecolor='darkred', markeredgewidth=0.5)
 
         # To visualise Q-values, find the largest absolute value for symmetric normalization
-        all_q_values = [q for row in self.world.grid for s in row if not s.is_terminal() for q in s.q_values]
+        all_q_values = []
+        for (r, c), state in self.world.states.items():
+            if not state.is_terminal():
+                all_q_values.extend(state.q_values)
+        
         # Find the maximum absolute value to create a symmetric range [-max, +max]
         max_abs_q = max(abs(q) for q in all_q_values) if all_q_values else 1.0
         if max_abs_q == 0: max_abs_q = 1.0 # Avoid division by zero
@@ -349,7 +422,11 @@ class LiveVisualiser:
         # Iterate through the grid and draw the Q-value arrows for each state-action pair
         for r in range(self.world.size):
             for c in range(self.world.size):
-                state = self.world.grid[r][c]
+                # Skip walls
+                if (r, c) in self.world.walls:
+                    continue
+                    
+                state = self.world.states[(r, c)]
                 if state.is_terminal():
                     continue
 
@@ -414,8 +491,14 @@ class LiveVisualiser:
         
         return self.anim
 
+
 # Initialise the core components
 config = Config()
+
+# Example: Test with a larger grid and walls
+# config.grid_size = 8
+# config.walls = [(r, 4) for r in range(1, 7)] + [(3, c) for c in range(2, 6)]
+
 world = World(config)
 agent = Agent(world, config)
 
