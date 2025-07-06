@@ -1,10 +1,13 @@
 # main.py
 from matplotlib import pyplot as plt
 from editor import GridEditor
+from config import Config
 
 if __name__ == "__main__":
-    # Create and display the grid editor. The editor will handle the rest.
+    # config instance
+    config = Config()
+    # Create and display the grid editor, passing the grid size from the config
     print("Launching Grid Editor")
-    editor = GridEditor(grid_size=10)
+    editor = GridEditor(grid_size=config.grid_size)
     plt.show()
     print("Application closed.")
