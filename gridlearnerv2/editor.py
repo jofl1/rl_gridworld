@@ -9,7 +9,7 @@ from simulation_core import World, Agent, Trainer
 from visualisers import Visualiser, LiveVisualiser
 
 
-class GridEditor:
+class RLMain:
     """Interactive matplotlib window for designing the grid-world environment."""
     
     # UI layout constants
@@ -27,15 +27,15 @@ class GridEditor:
         'Fire': Fire
     }
     
-    def __init__(self, grid_size: int):
+    def __init__(self):
         """
         Initialises the grid editor interface.
         
         Args:
             grid_size (int): Dimension of the square grid
         """
-        self.grid_size = grid_size
-        self.grid = np.full((grid_size, grid_size), Empty, dtype=int)
+        self.config = Config()
+        self.grid = np.full((self.config.world['grid_size'], self.config.world['grid_size']), Empty, dtype=int)
         self.cell_patches = {}  # dict[tuple[int, int], dict]: Maps (r,c) to patch and text objects
         
         # Create main figure and layout
@@ -64,17 +64,17 @@ class GridEditor:
     def _setup_grid(self):
         """Initialises the visual grid with empty cells."""
         # Configure grid appearance
-        self.ax.set_xticks(np.arange(self.grid_size + 1))
-        self.ax.set_yticks(np.arange(self.grid_size + 1))
+        self.ax.set_xticks(np.arange(self.config.world['grid_size'] + 1))
+        self.ax.set_yticks(np.arange(self.config.world['grid_size'] + 1))
         self.ax.set_xticklabels([])
         self.ax.set_yticklabels([])
         self.ax.grid(True)
-        self.ax.set_xlim(0, self.grid_size)
-        self.ax.set_ylim(self.grid_size, 0)  # Inverted Y for top-down view
+        self.ax.set_xlim(0, self.config.world['grid_size'])
+        self.ax.set_ylim(self.config.world['grid_size'], 0)  # Inverted Y for top-down view
         
         # Create cell patches
-        for r in range(self.grid_size):
-            for c in range(self.grid_size):
+        for r in range(self.config.world['grid_size']):
+            for c in range(self.config.world['grid_size']):
                 # Rectangle for cell background
                 rect = plt.Rectangle((c, r), 1, 1, 
                                    facecolor='white', 
@@ -87,6 +87,7 @@ class GridEditor:
                 
                 self.ax.add_patch(rect)
                 self.cell_patches[(r, c)] = {'rect': rect, 'symbol': symbol}
+            
     
     def _setup_controls(self):
         """Creates all control widgets in the right panel."""
@@ -101,7 +102,7 @@ class GridEditor:
         # Movement logic selection
         movement_ax = self.fig.add_subplot(controls_gs[1, 0])
         movement_ax.set_title("Movement Logic")
-        self.movement_radio = RadioButtons(movement_ax, ('Standard', 'No Path Crossing'))
+        self.movement_radio = RadioButtons(movement_ax, ('No Path Crossing', 'Allow Path Crossing'))
         
         # Tie-breaking algorithm toggle
         tiebreak_ax = self.fig.add_subplot(controls_gs[2, 0])
@@ -193,8 +194,8 @@ class GridEditor:
     
     def draw_grid(self):
         """Updates the visual grid display based on current grid state."""
-        for r in range(self.grid_size):
-            for c in range(self.grid_size):
+        for r in range(self.config.world['grid_size']):
+            for c in range(self.config.world['grid_size']):
                 cell_type = self.grid[r, c]
                 style = Cell_style[cell_type]
                 
@@ -244,7 +245,6 @@ class GridEditor:
             dict: Maps cell type to numpy array of positions
         """
         return {
-            'walls': np.where(self.grid == Wall),
             'fire': np.where(self.grid == Fire),
             'start': np.where(self.grid == Start),
             'goal': np.where(self.grid == Goal)
@@ -265,8 +265,8 @@ class GridEditor:
                 "ERROR: Please define exactly one Start (S) and one Goal (G).", 
                 color='red'
             )
-            self.fig.canvas.draw_idle()
-            return False
+            # self.fig.canvas.draw_idle()
+            return True
         return True
     
     def _build_config(self, positions: dict) -> Config:
@@ -280,16 +280,13 @@ class GridEditor:
             Config: Configured environment parameters
         """
         config = Config()
-        config.grid_size = self.grid_size
         
         # Convert numpy arrays to position tuples
-        config.walls = list(zip(positions['walls'][0], positions['walls'][1]))
         config.fire_pos = list(zip(positions['fire'][0], positions['fire'][1]))
-        config.start_pos = (positions['start'][0][0], positions['start'][1][0])
-        config.goal_pos = (positions['goal'][0][0], positions['goal'][1][0])
+
         
         # Apply UI settings
-        config.allow_path_crossing = self.movement_radio.value_selected == 'Standard'
+        config.allow_path_crossing = self.movement_radio.value_selected == 'Allow Path Crossing'
         config.use_jofl_algorithm = self.tiebreak_radio.value_selected == 'On'
         config.jofl_threshold = self.tiebreak_slider.val / 100  # Convert percentage to decimal
         
@@ -304,17 +301,17 @@ class GridEditor:
             live_mode (bool): Whether to show live training animation
         """
         # Create simulation components
-        world = World(config)
-        agent = Agent(world, config)
-        trainer = Trainer(agent, world, config)
+        self.world = World(config)
+        agent = Agent(self.world, config)
+        trainer = Trainer(agent, self.world, config)
         
         if live_mode:
             # Animated training visualisation
-            live_visualiser = LiveVisualiser(trainer, world, config)
+            live_visualiser = LiveVisualiser(trainer, self.world, config)
             anim = live_visualiser.animate_training()
             plt.show()
         else:
             # Train silently then show final results
             trainer.train()
-            visualiser = Visualiser(agent, world, config, trainer.episode_rewards)
+            visualiser = Visualiser(agent, self.world, config, trainer.episode_rewards)
             visualiser.display_results()

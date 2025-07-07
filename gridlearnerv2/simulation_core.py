@@ -1,7 +1,7 @@
 # simulation_core.py
 import random
 import numpy as np
-from config import Config
+from config import Config, Wall
 
 # used underscres to show private members.
 class Action:
@@ -164,6 +164,15 @@ class State:
             bool: True if state has non-zero reward (goal or hazard)
         """
         return self.reward != 0
+        
+    def is_goal(self) -> bool:
+        """
+        Checks if this state ends an episode.
+            
+        Returns:
+            bool: True if state has non-zero reward (goal or hazard)
+        """
+        return self.reward == 1
     
     def max_future_q(self) -> float:
         """
@@ -207,20 +216,21 @@ class World:
         Args:
             config (Config): Object containing grid_size, walls, goal_pos, etc.
         """
-        self.size = config.grid_size          # int: Grid dimension
-        self.walls = set(config.walls)       # set[tuple[int, int]]: Wall positions
+        self.size = config.world['grid_size']          # int: Grid dimension
         self.config = config                  # Config: Full configuration
-        self.states = {}                      # dict[tuple[int, int], State]: Position to state mapping
+        self.states = {}         # dict[tuple[int, int], State]: Position to state mapping
         
         # Build state space - only traversable cells become States
         for r in range(self.size):
             for c in range(self.size):
-                if (r, c) not in self.walls:
+                if (r, c) not in self.config.world['walls']:
                     self.states[(r, c)] = State(r, c, self._get_reward(r, c))
         
         # Pre-compute valid actions for each state
         for state in self.states.values():
             state.valid_actions = self._compute_valid_actions(state)
+            
+                    
     
     def _get_reward(self, row: int, col: int) -> int:
         """
@@ -233,7 +243,7 @@ class World:
         Returns:
             int: +1 for goal, -1 for fire/hazard, 0 for empty
         """
-        if (row, col) == self.config.goal_pos:
+        if (row, col) == self.config.world['goal_pos']:
             return +1
         if (row, col) in self.config.fire_pos:
             return -1
@@ -272,7 +282,7 @@ class World:
         r, c = pos
         return (0 <= r < self.size and 
                 0 <= c < self.size and 
-                pos not in self.walls)
+                pos not in self.config.world['walls'])
     
     def get_start_state(self) -> State:
         """
@@ -281,7 +291,7 @@ class World:
         Returns:
             State: Starting position state object
         """
-        return self.states[self.config.start_pos]
+        return self.states[self.config.world['start_pos']]
     
     def reward(self, row: int, col: int) -> int:
         """
@@ -312,8 +322,17 @@ class World:
         
         # Return next state if valid, otherwise current state
         return self.states.get(next_pos, state)
+        
+    def get_policy_path(self):
+        state = self.states[self.config.world['start_pos']]
+        path = [state]
+        while (not state.is_goal()) and len(path) < self.config.world['grid_size']*3:
+            action = state.get_max_action()
+            state = self.get_next_state(state, action)
+            path.append(state)
 
-
+        return path
+        
 class Agent:
     """Implements Q-learning algorithm with epsilon-greedy exploration."""
     
@@ -408,6 +427,7 @@ class Trainer:
         self.current_episode = 0       # int: Episode counter
         self.latest_path = None        # tuple[list[float], list[float]]: (x_coords, y_coords)
     
+    
     def run_one_episode(self):
         """
         Executes a single training episode with configurable path crossing.
@@ -417,7 +437,13 @@ class Trainer:
         state = self.world.get_start_state()
         
         # Track visited positions if path crossing disabled
-        visited = {state.position} if not self.config.allow_path_crossing else set()
+        
+        visited = set()
+        
+        if not self.config.allow_path_crossing:
+            visited.add(state.position)
+        
+        # visited = {state.position} if not self.config.allow_path_crossing else set()
         
         total_reward = 0
         # Path coordinates offset by 0.5 for centre of cell
@@ -426,21 +452,23 @@ class Trainer:
         # Execute steps until terminal state or step limit
         for step_num in range(self.config.steps):
             # Determine available actions based on path crossing setting
+            
+            available_actions = []
+            
             if self.config.allow_path_crossing:
-                available = state.get_valid_actions()
+                available_actions = state.get_valid_actions()
             else:
                 # Filter out actions leading to visited states
-                available = [
-                    a for a in state.get_valid_actions()
-                    if self.world.get_next_state(state, a).position not in visited
-                ]
+                available_actions = []
+                for action in state.get_valid_actions():
+                    if self.world.get_next_state(state,action).position not in visited:
+                        available_actions.append(action)
             
-            if not available:
-                break  # No valid moves available
             
-            try:
+            # print(f" available actions at {state.position}: {[a.name() for a in available_actions]}")
+            if available_actions:       # True if actions avaiable
                 # Select and execute action
-                action = self.agent.choose_action(state, available)
+                action = self.agent.choose_action(state, available_actions)
                 next_state = self.world.get_next_state(state, action)
                 
                 # Learn from transition
@@ -460,8 +488,6 @@ class Trainer:
                 if state.is_terminal():
                     break
                     
-            except ValueError:
-                break  # No actions available
         
         # Record episode results
         self.episode_rewards.append(total_reward)
@@ -477,4 +503,11 @@ class Trainer:
         episodes_to_run = self.config.episodes - self.current_episode
         for episode in range(episodes_to_run):
             self.run_one_episode()
+            path = self.world.get_policy_path()
+            if len(path) == 2* self.config.world['grid_size']-1:
+                print(f"path length = {len(path)}, Episode = {self.current_episode}")
+                print(path)
+                break
+                
         print("\nTraining finished.")
+

@@ -91,13 +91,13 @@ class BaseVisualiser:
                                          edgecolor='black', lw=0.5))
                 
                 pos = (r, c)
-                if pos in self.world.walls:
+                if pos in self.config.world['walls']:
                     # Draw wall
                     ax.add_patch(plt.Rectangle((c, r), 1, 1, fill=True, 
                                              facecolor='gray', edgecolor='black', lw=0.5))
                     ax.text(c + 0.5, r + 0.5, '■', ha='center', va='center', 
                            fontsize=self._symbol_fontsize, color='darkgray', weight='bold')
-                elif pos == self.config.start_pos:
+                elif pos == self.config.world['start_pos']:
                     # Draw start position
                     ax.text(c + 0.1, r + 0.1, 'S', ha='left', va='top', 
                            fontsize=self._label_fontsize, color='blue', weight='bold')
@@ -163,10 +163,15 @@ class BaseVisualiser:
                 fc=color, ec=color, alpha=transparency
             )
             
+            if q_val < 0.01:
+                q_val_color = 'yellow'
+            else:
+                q_val_color = 'blue'
+            
             # Draw Q-value text
-            text_x, text_y = self._text_positions[(row, col, i)]
+            text_x, text_y = self._text_positions[(row,col,i)]
             text = ax.text(text_x, text_y, f"{q_val:.2f}", 
-                          ha='center', va='center', 
+                          ha='center', va='center', color = q_val_color,
                           fontsize=self._q_value_fontsize, bbox=text_bbox)
             
             # Store references if animating
@@ -190,6 +195,8 @@ class Visualiser(BaseVisualiser):
         super().__init__(world, config)
         self.agent = agent
         self.episode_rewards = episode_rewards
+        self.config = config
+        self.world = world
     
     def plot_q_values(self):
         """Creates and displays the Q-value visualisation plot."""
@@ -205,7 +212,7 @@ class Visualiser(BaseVisualiser):
         
         # Draw Q-values for each state
         for pos, state in self.world.states.items():
-            if not state.is_terminal() and pos not in self.world.walls:
+            if not state.is_terminal() and pos not in self.config.world['walls']:
                 self._draw_q_arrows(ax, state, pos[0], pos[1], max_abs_q)
         
         plt.tight_layout()
@@ -214,11 +221,11 @@ class Visualiser(BaseVisualiser):
     def _print_policy(self):
         """Prints the learned policy as a text grid."""
         print("\nLearned Policy (Best move from each cell):")
-        for r in range(self.world.size):
+        for r in range(self.config.world['grid_size']):
             row_str = ""
-            for c in range(self.world.size):
+            for c in range(self.config.world['grid_size']):
                 pos = (r, c)
-                if pos in self.world.walls:
+                if pos in self.config.world['walls']:
                     row_str += " ■  "
                 elif pos in self.world.states:
                     state = self.world.states[pos]
@@ -252,7 +259,7 @@ class Visualiser(BaseVisualiser):
 class LiveVisualiser(BaseVisualiser):
     """Animated visualiser showing Q-learning progress in real-time."""
     
-    _animation_interval_ms = 1000
+    _animation_interval_ms = 1
     _update_frequency = 10  # Update success rate every N episodes
     
     def __init__(self, trainer: Trainer, world: World, config: Config):
@@ -353,7 +360,7 @@ class LiveVisualiser(BaseVisualiser):
         
         # Draw Q-values for all states
         for pos, state in self.world.states.items():
-            if not state.is_terminal() and pos not in self.world.walls:
+            if not state.is_terminal() and pos not in self.config.world['walls']:
                 self._draw_q_arrows(self.ax_grid, state, pos[0], pos[1], 
                                   max_abs_q, self.frame_info)
         
