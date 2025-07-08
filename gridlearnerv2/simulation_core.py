@@ -134,28 +134,10 @@ class State:
         """
         self.q_values[action.get_index()] = q_value
     
+        
     def get_max_action(self) -> Action:
-        """
-        Implements greedy action selection with random tie-breaking.
-        
-        Returns:
-            Action: Optimal action according to current Q-values
-        """
-        if not self.valid_actions:
-            return Action(0)  # Fallback for edge cases
-        
-        # Build list of (action, q_value) tuples for valid actions
-        q_values_valid = [(a, self.get_q_value(a)) for a in self.valid_actions]
-        
-        # Find maximum Q-value
-        max_q = max(q for _, q in q_values_valid)
-        
-        # Collect all actions achieving this maximum
-        max_actions = [a for a, q in q_values_valid if abs(q - max_q) < 1e-9]
-        
-        # Random selection amongst optimal actions
-        return random.choice(max_actions)
-    
+        return Action(np.argmax(self.q_values))
+
     def is_terminal(self) -> bool:
         """
         Checks if this state ends an episode.
@@ -504,10 +486,23 @@ class Trainer:
         for episode in range(episodes_to_run):
             self.run_one_episode()
             path = self.world.get_policy_path()
-            if len(path) == 2* self.config.world['grid_size']-1:
+            policy_valid = False 
+            for qv in self.world.states[self.config.world['start_pos']].q_values:
+                if qv != 0:
+                    policy_valid = True
+            
+            if policy_valid:
                 print(f"path length = {len(path)}, Episode = {self.current_episode}")
-                print(path)
+                print([str(s) for s in path])
                 break
+                # print([str(s) for s in path])
+            # if len(path) == 2* self.config.world['grid_size']-1:
+                # print(f"path length = {len(path)}, Episode = {self.current_episode}")
+               
+            
+               
+                # print(path)
+                #break
                 
         print("\nTraining finished.")
 

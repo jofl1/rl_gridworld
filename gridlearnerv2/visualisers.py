@@ -163,7 +163,7 @@ class BaseVisualiser:
                 fc=color, ec=color, alpha=transparency
             )
             
-            if q_val < 0.01:
+            if q_val == 0:
                 q_val_color = 'yellow'
             else:
                 q_val_color = 'blue'
