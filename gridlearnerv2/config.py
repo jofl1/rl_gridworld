@@ -35,8 +35,8 @@ class Config:
         
         self.world = self.block_world1
         
-        self.learning_rate = 0.9
-        self.discount_factor = 0.99
+        self.learning_rate = 0.1
+        self.discount_factor = 0.9
         self.exploration_rate = 0.1
         self.episodes = 2000
         self.steps = self.world['grid_size'] * 6
